@@ -40,6 +40,11 @@ jobs:
           set -euxo pipefail
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git "$GITHUB_WORKSPACE/clang"
           echo "$GITHUB_WORKSPACE/clang/bin" >> "$GITHUB_PATH"
+          # This 4.14 MTK tree invokes CROSS_COMPILE gcc for compiler feature tests.
+          # Use clang itself as the prefixed compiler so stack-protector checks test
+          # the same compiler that is used for the actual kernel build.
+          ln -sf "$GITHUB_WORKSPACE/clang/bin/clang" "$GITHUB_WORKSPACE/clang/bin/aarch64-linux-gnu-gcc"
+          ln -sf "$GITHUB_WORKSPACE/clang/bin/clang" "$GITHUB_WORKSPACE/clang/bin/arm-linux-gnueabi-gcc"
 
       - name: Integrate latest ReSukiSU
         shell: bash
