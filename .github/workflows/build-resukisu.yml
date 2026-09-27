@@ -1,0 +1,123 @@
+name: Build rosemary kernel (ReSukiSU + SUSFS + nomount)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - Miui-v2
+    paths:
+      - '.github/workflows/build-resukisu.yml'
+      - 'arch/arm64/configs/rosemary_defconfig'
+      - 'Makefile'
+      - 'fs/**'
+      - 'drivers/**'
+      - 'include/**'
+      - 'kernel/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      DEFCONFIG: rosemary_defconfig
+      OUT: out
+      KBUILD_BUILD_USER: vildang
+      KBUILD_BUILD_HOST: github-actions
+
+    steps:
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex git             libelf-dev libssl-dev python3 zip unzip rsync gcc-aarch64-linux-gnu
+
+      - name: Fetch AOSP clang
+        run: |
+          git clone --depth=1 -b android-11.0.0_r48             https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86             clang
+          CLANG_BIN="$(find "$PWD/clang" -type f -path '*/bin/clang' | sort -V | tail -n1)"
+          test -x "$CLANG_BIN"
+          echo "CLANG_DIR=$(dirname "$CLANG_BIN")" >> "$GITHUB_ENV"
+
+      - name: Integrate latest ReSukiSU
+        run: |
+          curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh | bash
+
+      - name: Fetch SUSFS 4.14 backport
+        run: |
+          git clone --depth=1 -b kernel-4.14-backport             https://github.com/devnoname120/susfs4ksu-toco.git susfs4ksu
+
+          # Kernel-side SUSFS files
+          cp -f susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp -f susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+
+          # Prefer explicit 4.14 patch name, otherwise pick the only 4.14 kernel patch.
+          SUSFS_PATCH="$(find susfs4ksu/kernel_patches -maxdepth 1 -type f             \( -name '*4.14*.patch' -o -name '50_add_susfs_in_kernel-4.14.patch' \)             | head -n1)"
+          test -n "$SUSFS_PATCH"
+          patch -p1 --forward < "$SUSFS_PATCH"
+
+      - name: Enable ReSukiSU + SUSFS + nomount-oriented config
+        run: |
+          CFG="arch/arm64/configs/$DEFCONFIG"
+
+          # Remove conflicting choices first.
+          sed -i             -e '/^CONFIG_KSU=/d'             -e '/^CONFIG_KSU_TRACEPOINT_HOOK=/d'             -e '/^CONFIG_KSU_MANUAL_HOOK=/d'             -e '/^CONFIG_KSU_SUSFS=/d'             -e '/^CONFIG_KSU_SUSFS_/d'             "$CFG"
+
+          cat >> "$CFG" <<'EOF'
+
+# ReSukiSU / SUSFS
+CONFIG_KSU=y
+# CONFIG_KSU_TRACEPOINT_HOOK is not set
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+CONFIG_KSU_SUSFS_SUS_MAP=y
+# CONFIG_KSU_SUSFS_ENABLE_LOG is not set
+EOF
+
+      - name: Configure kernel
+        run: |
+          export PATH="$CLANG_DIR:$PATH"
+          make O="$OUT" ARCH=arm64 "$DEFCONFIG"
+          make O="$OUT" ARCH=arm64 olddefconfig
+
+          echo '=== KernelSU/SUSFS config ==='
+          grep -E '^(CONFIG_KSU|# CONFIG_KSU)' "$OUT/.config" || true
+
+          grep -q '^CONFIG_KSU=y' "$OUT/.config"
+          grep -q '^CONFIG_KSU_SUSFS=y' "$OUT/.config"
+
+      - name: Build kernel
+        run: |
+          export PATH="$CLANG_DIR:$PATH"
+          make -j"$(nproc)" O="$OUT" ARCH=arm64             CC=clang             CLANG_TRIPLE=aarch64-linux-gnu-             CROSS_COMPILE=aarch64-linux-gnu-             CROSS_COMPILE_ARM32=arm-linux-gnueabi-             Image.gz-dtb
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          find "$OUT/arch/arm64/boot" -maxdepth 1 -type f             \( -name 'Image' -o -name 'Image.gz' -o -name 'Image.gz-dtb' -o -name '*.dtb' \)             -exec cp -v {} artifacts/ \;
+
+          cp "$OUT/.config" artifacts/kernel.config
+
+          if [ -d KernelSU ]; then
+            git -C KernelSU rev-parse HEAD > artifacts/resukisu-commit.txt
+          fi
+          git -C susfs4ksu rev-parse HEAD > artifacts/susfs-commit.txt
+
+          test -n "$(find artifacts -maxdepth 1 -type f -name 'Image*' -print -quit)"
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rosemary-ReSukiSU-SUSFS-nomount-${{ github.run_number }}
+          path: artifacts/*
+          if-no-files-found: error
