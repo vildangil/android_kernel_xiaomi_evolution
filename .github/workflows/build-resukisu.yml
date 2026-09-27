@@ -59,6 +59,8 @@ jobs:
           test -f susfs4ksu/kernel_patches/include/linux/susfs.h
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
+          test -f susfs4ksu/kernel_patches/include/linux/susfs_def.h
+          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
 
           SUSFS_PATCH="$(find susfs4ksu/kernel_patches -maxdepth 1 -type f -name '*4.14*.patch' | head -n1)"
           test -n "$SUSFS_PATCH"
