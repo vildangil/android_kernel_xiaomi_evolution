@@ -119,8 +119,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          make O="$OUT" ARCH=arm64 "$DEFCONFIG"
-          make O="$OUT" ARCH=arm64 olddefconfig
+          make O="$OUT" ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- "$DEFCONFIG"
+          make O="$OUT" ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           grep -E '^(CONFIG_KSU|# CONFIG_KSU)' "$OUT/.config" || true
           grep -q '^CONFIG_KSU=y' "$OUT/.config"
           grep -q '^CONFIG_KSU_SUSFS=y' "$OUT/.config"
