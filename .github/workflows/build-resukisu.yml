@@ -40,6 +40,13 @@ jobs:
           set -euxo pipefail
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git "$GITHUB_WORKSPACE/clang"
           echo "$GITHUB_WORKSPACE/clang/bin" >> "$GITHUB_PATH"
+          # Proton clang 13 otherwise delegates assembly to the host x86 /usr/bin/as.
+          # Provide target-prefixed GNU binutils where clang searches for them.
+          mkdir -p "$GITHUB_WORKSPACE/cross-bin"
+          for tool in as ld ar nm objcopy objdump strip; do
+            ln -sf "/usr/bin/aarch64-linux-gnu-$tool" "$GITHUB_WORKSPACE/cross-bin/aarch64-linux-gnu-$tool"
+          done
+          echo "$GITHUB_WORKSPACE/cross-bin" >> "$GITHUB_PATH"
 
       - name: Integrate latest ReSukiSU
         shell: bash
@@ -114,8 +121,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          make O="$OUT" ARCH=arm64 CC="clang --target=aarch64-linux-gnu --prefix=/usr/bin/" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- "$DEFCONFIG"
-          make O="$OUT" ARCH=arm64 CC="clang --target=aarch64-linux-gnu --prefix=/usr/bin/" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- olddefconfig
+          make O="$OUT" ARCH=arm64 CC="clang --target=aarch64-linux-gnu --prefix=$GITHUB_WORKSPACE/cross-bin/" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- "$DEFCONFIG"
+          make O="$OUT" ARCH=arm64 CC="clang --target=aarch64-linux-gnu --prefix=$GITHUB_WORKSPACE/cross-bin/" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- olddefconfig
           grep -E '^(CONFIG_KSU|# CONFIG_KSU)' "$OUT/.config" || true
           grep -q '^CONFIG_KSU=y' "$OUT/.config"
           grep -q '^CONFIG_KSU_SUSFS=y' "$OUT/.config"
@@ -124,7 +131,7 @@ jobs:
           # clang setup. Disable only the Kconfig stack-protector selection so the
           # build can proceed; ReSukiSU/SUSFS settings remain enabled.
           scripts/config --file "$OUT/.config" -d CC_STACKPROTECTOR -d CC_STACKPROTECTOR_REGULAR -d CC_STACKPROTECTOR_STRONG
-          make O="$OUT" ARCH=arm64 CC="clang --target=aarch64-linux-gnu --prefix=/usr/bin/" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- olddefconfig
+          make O="$OUT" ARCH=arm64 CC="clang --target=aarch64-linux-gnu --prefix=$GITHUB_WORKSPACE/cross-bin/" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- olddefconfig
 
       - name: Build
         shell: bash
