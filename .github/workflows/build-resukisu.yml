@@ -125,6 +125,12 @@ jobs:
           grep -q '^CONFIG_KSU=y' "$OUT/.config"
           grep -q '^CONFIG_KSU_SUSFS=y' "$OUT/.config"
 
+          # Android 4.14's legacy compiler probe is incompatible with this modern
+          # clang setup. Disable only the Kconfig stack-protector selection so the
+          # build can proceed; ReSukiSU/SUSFS settings remain enabled.
+          scripts/config --file "$OUT/.config" -d CC_STACKPROTECTOR -d CC_STACKPROTECTOR_REGULAR -d CC_STACKPROTECTOR_STRONG
+          make O="$OUT" ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
       - name: Build
         shell: bash
         run: |
