@@ -84,6 +84,9 @@ jobs:
             '#ifndef ND_STATE_RENAMEAT' '#define ND_STATE_RENAMEAT 16' '#endif' \
             '#ifndef LOOKUP_FILENAME_CREATE' '#define LOOKUP_FILENAME_CREATE 0x800000' '#endif' \
             '#ifndef LOOKUP_RENAMEAT' '#define LOOKUP_RENAMEAT 0x1000000' '#endif' \
+            '#ifndef DEFAULT_SUS_MNT_ID' '#define DEFAULT_SUS_MNT_ID 100000' '#endif' \
+            '#ifndef DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE' '#define DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE 1000000' '#endif' \
+            '#ifndef DEFAULT_SUS_MNT_GROUP_ID' '#define DEFAULT_SUS_MNT_GROUP_ID 1000' '#endif' \
             >> include/linux/susfs_def.h
 
           SUSFS_PATCH="$(find susfs4ksu/kernel_patches -maxdepth 1 -type f -name '*4.14*.patch' | head -n1)"
