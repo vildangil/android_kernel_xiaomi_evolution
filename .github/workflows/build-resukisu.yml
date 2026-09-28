@@ -62,6 +62,19 @@ jobs:
           test -f susfs4ksu/kernel_patches/include/linux/susfs_def.h
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
 
+          # ReSukiSU main tracks current SUSFS. The old 4.14 backport provides
+          # the VFS integration patch, but its userspace command API is stale.
+          # Pull current SUSFS v2.2.0 kernel-side files from a working MT6785
+          # kernel so dispatch.c and the kernel implementation stay in sync.
+          SUSFS_MT6785_REF="254573cba0bb441a15f51c4bb7e2fd0b7b6f6410"
+          curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/fs/susfs.c" -o fs/susfs.c
+          curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/include/linux/susfs.h" -o include/linux/susfs.h
+          curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/include/linux/susfs_def.h" -o include/linux/susfs_def.h
+          grep -q 'CMD_SUSFS_ADD_SUS_PATH_LOOP' include/linux/susfs_def.h
+          grep -q 'CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS' include/linux/susfs_def.h
+          grep -q 'CMD_SUSFS_ADD_SUS_MAP' include/linux/susfs_def.h
+          grep -q 'CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING' include/linux/susfs_def.h
+
           SUSFS_PATCH="$(find susfs4ksu/kernel_patches -maxdepth 1 -type f -name '*4.14*.patch' | head -n1)"
           test -n "$SUSFS_PATCH"
           set +e
