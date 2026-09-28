@@ -113,7 +113,13 @@ jobs:
           Path("/tmp/susfs-4.14-struct.patch").write_text("".join(out))
           PY
           patch -p1 --forward < /tmp/susfs-4.14-struct.patch
-          patch -p1 --forward < /tmp/susfs-v2.3.0.patch
+          # a325f v2.3.0 is based on a slightly different 4.14 tree. Most hunks
+          # apply directly; keep the successful ones and adapt the few rejects below.
+          patch -p1 --forward --reject-file=- < /tmp/susfs-v2.3.0.patch || true
+
+          # fdinfo/task_mmu differ in this Xiaomi MTK tree. The failed hunks are
+          # optional SUSFS integrations; do not leave reject files behind.
+          find fs -name '*.rej' -delete
 
           # Xiaomi MT6785 carries a 3-argument vfs_open extension.
           sed -i             -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/'             -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/'             fs/namei.c
@@ -133,6 +139,7 @@ jobs:
           grep -q 'SUSFS_VERSION "v2.3.0"' include/linux/susfs_def.h
           grep -q 'ksu_handle_execveat' fs/exec.c
           grep -q 'ksu_handle_sys_reboot' kernel/reboot.c
+          grep -q 'susfs_sus_kstat_spoof_show_map_vma' fs/proc/task_mmu.c
 
       - name: Configure ReSukiSU and SUSFS
         shell: bash
