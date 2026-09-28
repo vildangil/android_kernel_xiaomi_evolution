@@ -300,6 +300,10 @@ jobs:
             -e 's/^int __attribute__((weak)) get_cur_ddr_khz()$/int __attribute__((weak)) get_cur_ddr_khz(void)/' \
             drivers/misc/mediatek/perf/perf_tracker.c
 
+          sed -i \
+            's/^char \*dprec_logger_get_dump_addr()$/char *dprec_logger_get_dump_addr(void)/' \
+            drivers/misc/mediatek/video/mt6785/dispsys/display_recorder.c
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
