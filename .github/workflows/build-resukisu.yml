@@ -277,6 +277,12 @@ jobs:
           p.write_text(s)
           PY
 
+          # Old MTK 4.14 sources still contain a K&R-style function definition.
+          # Modern clang diagnoses it as -Wdeprecated-non-prototype and this tree
+          # promotes that diagnostic to an error. Preserve behavior, add the type.
+          sed -i 's/^int get_cluster_off_token(cpu)$/int get_cluster_off_token(int cpu)/' \
+            drivers/misc/mediatek/base/power/mcdi/mtk_mcdi_governor.c
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
