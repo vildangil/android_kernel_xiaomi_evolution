@@ -116,12 +116,15 @@ jobs:
           p = Path("fs/proc/task_mmu.c")
           s = p.read_text()
           if "susfs_sus_ino_for_show_map_vma" in s:
-              s = s.replace(
-                  "extern void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned long *out_ino);",
-                  "extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);")
-              s = s.replace(
-                  "susfs_sus_ino_for_show_map_vma(ino, &dev, &ino);",
-                  "susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);")
+              import re
+              s = re.sub(
+                  r"susfs_sus_ino_for_show_map_vma\s*\(\s*ino\s*,\s*&dev\s*,\s*&ino\s*\)\s*;",
+                  "susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);", s)
+              s = re.sub(
+                  r"extern\s+void\s+susfs_sus_ino_for_show_map_vma\s*\([^;]+\)\s*;",
+                  "extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);", s)
+          if "susfs_sus_ino_for_show_map_vma" in s:
+              raise SystemExit("legacy SUSFS show_map_vma hook still present")
           p.write_text(s)
           PY
 
