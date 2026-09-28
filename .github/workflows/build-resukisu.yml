@@ -79,7 +79,13 @@ jobs:
           # 4.14 VFS backport. Current SUSFS renamed its inode flags, but the
           # applied 4.14 patch still references these legacy compatibility names.
           printf '%s\n' \
+            '#ifndef INODE_STATE_SUS_PATH' '#define INODE_STATE_SUS_PATH BIT(24)' '#endif' \
+            '#ifndef INODE_STATE_SUS_MOUNT' '#define INODE_STATE_SUS_MOUNT BIT(25)' '#endif' \
+            '#ifndef INODE_STATE_SUS_KSTAT' '#define INODE_STATE_SUS_KSTAT BIT(26)' '#endif' \
             '#ifndef INODE_STATE_OPEN_REDIRECT' '#define INODE_STATE_OPEN_REDIRECT BIT(27)' '#endif' \
+            '#ifndef INODE_STATE_ANDROID_DATA_ROOT_DIR' '#define INODE_STATE_ANDROID_DATA_ROOT_DIR BIT(28)' '#endif' \
+            '#ifndef INODE_STATE_SDCARD_ROOT_DIR' '#define INODE_STATE_SDCARD_ROOT_DIR BIT(29)' '#endif' \
+            '#ifndef TASK_STRUCT_NON_ROOT_USER_APP_PROC' '#define TASK_STRUCT_NON_ROOT_USER_APP_PROC BIT(24)' '#endif' \
             '#ifndef ND_STATE_FILENAME_CREATE' '#define ND_STATE_FILENAME_CREATE 8' '#endif' \
             '#ifndef ND_STATE_RENAMEAT' '#define ND_STATE_RENAMEAT 16' '#endif' \
             '#ifndef LOOKUP_FILENAME_CREATE' '#define LOOKUP_FILENAME_CREATE 0x800000' '#endif' \
