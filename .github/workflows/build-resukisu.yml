@@ -78,23 +78,13 @@ jobs:
           # Keep the compatibility state/lookup bits expected by the existing
           # 4.14 VFS backport. Current SUSFS renamed its inode flags, but the
           # applied 4.14 patch still references these legacy compatibility names.
-          cat >> include/linux/susfs_def.h <<'EOF'
-#ifndef INODE_STATE_OPEN_REDIRECT
-#define INODE_STATE_OPEN_REDIRECT BIT(27)
-#endif
-#ifndef ND_STATE_FILENAME_CREATE
-#define ND_STATE_FILENAME_CREATE 8
-#endif
-#ifndef ND_STATE_RENAMEAT
-#define ND_STATE_RENAMEAT 16
-#endif
-#ifndef LOOKUP_FILENAME_CREATE
-#define LOOKUP_FILENAME_CREATE 0x800000
-#endif
-#ifndef LOOKUP_RENAMEAT
-#define LOOKUP_RENAMEAT 0x1000000
-#endif
-EOF
+          printf '%s\n' \
+            '#ifndef INODE_STATE_OPEN_REDIRECT' '#define INODE_STATE_OPEN_REDIRECT BIT(27)' '#endif' \
+            '#ifndef ND_STATE_FILENAME_CREATE' '#define ND_STATE_FILENAME_CREATE 8' '#endif' \
+            '#ifndef ND_STATE_RENAMEAT' '#define ND_STATE_RENAMEAT 16' '#endif' \
+            '#ifndef LOOKUP_FILENAME_CREATE' '#define LOOKUP_FILENAME_CREATE 0x800000' '#endif' \
+            '#ifndef LOOKUP_RENAMEAT' '#define LOOKUP_RENAMEAT 0x1000000' '#endif' \
+            >> include/linux/susfs_def.h
 
           SUSFS_PATCH="$(find susfs4ksu/kernel_patches -maxdepth 1 -type f -name '*4.14*.patch' | head -n1)"
           test -n "$SUSFS_PATCH"
