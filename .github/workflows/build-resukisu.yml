@@ -75,18 +75,6 @@ jobs:
           grep -q 'CMD_SUSFS_ADD_SUS_MAP' include/linux/susfs_def.h
           grep -q 'CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING' include/linux/susfs_def.h
 
-          # Keep the VFS call sites in the same SUSFS generation as fs/susfs.c.
-          # The legacy 4.14 patch below still injects obsolete Android-data,
-          # sdcard and kstat helpers, so use the already-ported MT6785 VFS
-          # implementations for the affected files.
-          for f in fs/namei.c fs/readdir.c fs/proc/task_mmu.c; do
-            curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/$f" -o "$f"
-          done
-          # This Xiaomi tree carries a 3-argument vfs_open() extension.
-          sed -i \
-            -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/' \
-            -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/' \
-            fs/namei.c
 
           # Keep the compatibility state/lookup bits expected by the existing
           # 4.14 VFS backport. Current SUSFS renamed its inode flags, but the
@@ -114,6 +102,18 @@ jobs:
           patch -p1 --forward < "$SUSFS_PATCH"
           PATCH_RC=$?
           set -e
+
+          # The generic 4.14 patch above provides integration for the rest of
+          # the tree. Its VFS hunks use the obsolete SUSFS API, so overwrite
+          # only those affected call-site files with the current MT6785 port.
+          for f in fs/namei.c fs/readdir.c fs/proc/task_mmu.c; do
+            curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/$f" -o "$f"
+          done
+          # This Xiaomi tree carries a 3-argument vfs_open() extension.
+          sed -i \
+            -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/' \
+            -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/' \
+            fs/namei.c
 
           # Xiaomi's 4.14 tree differs from the backport baseline in three places.
           # Apply the small compatibility pieces that the generic patch misses.
