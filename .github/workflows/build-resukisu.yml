@@ -230,10 +230,14 @@ jobs:
               "#ifdef CONFIG_KSU_SUSFS\nextern bool ksu_input_hook __read_mostly;\nextern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif\n\nvoid input_event(struct input_dev *dev,",
               "ksu_handle_input_handle_event")
           p=Path("drivers/input/input.c"); s=p.read_text()
-          call="\t\tksu_handle_input_handle_event(&type, &code, &value);"
+          call="\tksu_handle_input_handle_event(&type, &code, &value);"
           if call not in s:
-              old="\tunsigned long flags;\n"
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n\tif (unlikely(ksu_input_hook))\n"+call+"\n#endif\n",1); p.write_text(s)
+              fn=("static void input_handle_event(struct input_dev *dev,\n"
+                  "\t\t\t       unsigned int type, unsigned int code, int value)\n"
+                  "{")
+              if fn not in s: raise SystemExit("drivers/input/input.c input_handle_event anchor not found")
+              s=s.replace(fn,fn+"\n#ifdef CONFIG_KSU_SUSFS\n\tif (unlikely(ksu_input_hook))\n"+call+"\n#endif",1)
+              p.write_text(s)
           PY
 
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
