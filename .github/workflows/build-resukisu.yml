@@ -75,6 +75,14 @@ jobs:
           grep -q 'CMD_SUSFS_ADD_SUS_MAP' include/linux/susfs_def.h
           grep -q 'CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING' include/linux/susfs_def.h
 
+          # Keep the VFS call sites in the same SUSFS generation as fs/susfs.c.
+          # The legacy 4.14 patch below still injects obsolete Android-data,
+          # sdcard and kstat helpers, so use the already-ported MT6785 VFS
+          # implementations for the affected files.
+          for f in fs/namei.c fs/readdir.c fs/proc/task_mmu.c; do
+            curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/$f" -o "$f"
+          done
+
           # Keep the compatibility state/lookup bits expected by the existing
           # 4.14 VFS backport. Current SUSFS renamed its inode flags, but the
           # applied 4.14 patch still references these legacy compatibility names.
