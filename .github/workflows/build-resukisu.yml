@@ -61,9 +61,32 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          lines=Path("/tmp/susfs-v2.3.0.raw").read_text().splitlines()
-          for i,line in enumerate(lines):
-              m=re.match(r'^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@(.*)
+          lines = Path('/tmp/susfs-v2.3.0.raw').read_text().splitlines()
+          for i, line in enumerate(lines):
+              m = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$', line)
+              if not m:
+                  continue
+              oldc = newc = 0
+              j = i + 1
+              while j < len(lines) and not lines[j].startswith('@@ ') and not lines[j].startswith('diff --git '):
+                  z = lines[j]
+                  if z == '' and j + 1 < len(lines) and lines[j + 1].startswith('diff --git '):
+                      j += 1
+                      continue
+                  if z.startswith('\\ No newline'):
+                      j += 1
+                      continue
+                  if z.startswith('+'):
+                      newc += 1
+                  elif z.startswith('-'):
+                      oldc += 1
+                  else:
+                      oldc += 1
+                      newc += 1
+                  j += 1
+              lines[i] = f'@@ -{m.group(1)},{oldc} +{m.group(3)},{newc} @@{m.group(5)}'
+          Path('/tmp/susfs-v2.3.0.patch').write_text('\n'.join(lines) + '\n')
+          PY
 
           # ReSukiSU's own 4.14 manual hooks, not WhiteSU/KSU-next hooks.
           patch -p1 --forward < /tmp/resukisu-4.14.patch
@@ -172,127 +195,3 @@ jobs:
           name: rosemary-ReSukiSU-SUSFS-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: error, line)
-              if not m: continue
-              oldc=newc=0
-              j=i+1
-              while j < len(lines) and not lines[j].startswith("@@ ") and not lines[j].startswith("diff --git "):
-                  z=lines[j]
-                  if z == "" and j+1 < len(lines) and lines[j+1].startswith("diff --git "):
-                      j += 1; continue
-                  if z.startswith("\\ No newline"):
-                      j += 1; continue
-                  if z.startswith("+"): newc += 1
-                  elif z.startswith("-"): oldc += 1
-                  else: oldc += 1; newc += 1
-                  j += 1
-              lines[i]=f"@@ -{m.group(1)},{oldc} +{m.group(3)},{newc} @@{m.group(5)}"
-          Path("/tmp/susfs-v2.3.0.patch").write_text("\\n".join(lines)+"\\n")
-          PY
-
-          # ReSukiSU's own 4.14 manual hooks, not WhiteSU/KSU-next hooks.
-          patch -p1 --forward < /tmp/resukisu-4.14.patch
-
-          # MrGadget84 splits the 4.14 port between a structural patch and the
-          # v2.3.0 SUSFS patch. Apply only the structural-only files from 50_*
-          # first; overlapping VFS files are supplied by v2.3.0 itself.
-          python3 - <<'PY'
-          from pathlib import Path
-          src=Path("/tmp/susfs-4.14-base.patch").read_text()
-          keep={
-              "fs/dcache.c",
-              "fs/overlayfs/inode.c","fs/overlayfs/overlayfs.h",
-              "fs/overlayfs/readdir.c","fs/overlayfs/super.c","fs/overlayfs/util.c",
-              "include/linux/mount.h","include/linux/sched.h",
-          }
-          chunks=src.split("diff --git ")
-          out=[]
-          for ch in chunks[1:]:
-              first=ch.splitlines()[0]
-              path=first.split()[0]
-              if path.startswith("a/"): path=path[2:]
-              if path in keep: out.append("diff --git "+ch)
-          Path("/tmp/susfs-4.14-struct.patch").write_text("".join(out))
-          PY
-          patch -p1 --forward < /tmp/susfs-4.14-struct.patch
-          patch -p1 --forward < /tmp/susfs-v2.3.0.patch
-
-          # Xiaomi MT6785 carries a 3-argument vfs_open extension.
-          sed -i             -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/'             -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/'             fs/namei.c
-
-          # Existing MTK/clang compatibility fixes unrelated to KSU/SUSFS.
-          sed -i 's/^int get_cluster_off_token(cpu)$/int get_cluster_off_token(int cpu)/'             drivers/misc/mediatek/base/power/mcdi/mtk_mcdi_governor.c
-          sed -i 's/%512s/%511s/g'             drivers/misc/mediatek/base/power/udi_v2/mtk_udi.c
-          sed -i 's/^extern ddp_dsi_config(/extern int ddp_dsi_config(/'             drivers/misc/mediatek/video/mt6785/videox/disp_recovery.h
-          sed -i             -e 's/^int __attribute__((weak)) get_cur_vcore_uv()$/int __attribute__((weak)) get_cur_vcore_uv(void)/'             -e 's/^int __attribute__((weak)) get_cur_ddr_khz()$/int __attribute__((weak)) get_cur_ddr_khz(void)/'             drivers/misc/mediatek/perf/perf_tracker.c
-          sed -i 's/^char \*dprec_logger_get_dump_addr()$/char *dprec_logger_get_dump_addr(void)/'             drivers/misc/mediatek/video/mt6785/dispsys/display_recorder.c
-
-          # Do not silently continue with half-applied security/VFS patches.
-          if find . -name '*.rej' -print -quit | grep -q .; then
-            find . -name '*.rej' -print
-            exit 1
-          fi
-          grep -q 'SUSFS_VERSION "v2.3.0"' include/linux/susfs_def.h
-          grep -q 'ksu_handle_execveat' fs/exec.c
-          grep -q 'ksu_handle_sys_reboot' kernel/reboot.c
-
-      - name: Configure ReSukiSU and SUSFS
-        shell: bash
-        run: |
-          set -euxo pipefail
-          CFG="arch/arm64/configs/$DEFCONFIG"
-          sed -i -e '/^CONFIG_KSU=/d' -e '/^CONFIG_KSU_TRACEPOINT_HOOK=/d' -e '/^CONFIG_KSU_MANUAL_HOOK=/d' -e '/^CONFIG_KSU_SUSFS=/d' -e '/^CONFIG_KSU_SUSFS_/d' "$CFG"
-          printf '%s\n' '' '# ReSukiSU + SUSFS' 'CONFIG_KSU=y' '# CONFIG_KSU_TRACEPOINT_HOOK is not set' 'CONFIG_KSU_MANUAL_HOOK=y' 'CONFIG_KSU_SUSFS=y' 'CONFIG_KSU_SUSFS_SUS_PATH=y' 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' 'CONFIG_KSU_SUSFS_SUS_KSTAT=y' 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' 'CONFIG_KSU_SUSFS_SUS_MAP=y' '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' >> "$CFG"
-
-      - name: Generate config
-        shell: bash
-        run: |
-          set -euxo pipefail
-          make O="$OUT" ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- "$DEFCONFIG"
-          make O="$OUT" ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-          grep -E '^(CONFIG_KSU|# CONFIG_KSU)' "$OUT/.config" || true
-          grep -q '^CONFIG_KSU=y' "$OUT/.config"
-          grep -q '^CONFIG_KSU_SUSFS=y' "$OUT/.config"
-
-          # Android 4.14's legacy compiler probe is incompatible with this modern
-          # clang setup. Disable only the Kconfig stack-protector selection so the
-          # build can proceed; ReSukiSU/SUSFS settings remain enabled.
-          scripts/config --file "$OUT/.config" -d CC_STACKPROTECTOR -d CC_STACKPROTECTOR_REGULAR -d CC_STACKPROTECTOR_STRONG
-          make O="$OUT" ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-
-      - name: Build
-        shell: bash
-        run: |
-          set -euxo pipefail
-          make -j"$(nproc)" O="$OUT" ARCH=arm64 \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            KCFLAGS="-Wno-error=unused-but-set-variable" \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            Image.gz-dtb
-
-      - name: Collect artifacts
-        if: success()
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p artifacts
-          cp "$OUT/.config" artifacts/kernel.config
-          find "$OUT/arch/arm64/boot" -maxdepth 1 -type f \( -name 'Image' -o -name 'Image.gz' -o -name 'Image.gz-dtb' -o -name '*.dtb' \) -exec cp -v {} artifacts/ \;
-          git -C KernelSU rev-parse HEAD > artifacts/resukisu-commit.txt
-          printf '%s\n' 'MrGadget84/kernel_builder:a325f:ksu/sus/susfs-v2.3.0.txt' > artifacts/susfs-source.txt
-          test -n "$(find artifacts -maxdepth 1 -type f -name 'Image*' -print -quit)"
-
-      - name: Upload artifacts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rosemary-ReSukiSU-SUSFS-${{ github.run_number }}
-          path: artifacts/
-          if-no-files-found: error
