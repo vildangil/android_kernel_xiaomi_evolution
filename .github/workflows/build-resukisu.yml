@@ -173,6 +173,68 @@ jobs:
               p.write_text(s)
           PY
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def patch(path, old, new, name):
+              p=Path(path); s=p.read_text()
+              if name not in s:
+                  if old not in s: raise SystemExit(f"{path}: anchor for {name} not found")
+                  p.write_text(s.replace(old,new,1))
+
+          patch("fs/open.c",
+              "/*\n * access() needs to use the real uid/gid, not the effective uid/gid.",
+              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n\n/*\n * access() needs to use the real uid/gid, not the effective uid/gid.",
+              "ksu_handle_faccessat")
+          p=Path("fs/open.c"); s=p.read_text()
+          call="\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);"
+          if call not in s:
+              old="\tunsigned int lookup_flags = LOOKUP_FOLLOW;\n"
+              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
+
+          patch("fs/read_write.c",
+              "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
+              "#ifdef CONFIG_KSU_SUSFS\nextern bool ksu_vfs_read_hook __read_mostly;\nextern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif\n\nSYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
+              "ksu_handle_sys_read")
+          p=Path("fs/read_write.c"); s=p.read_text()
+          call="\t\tksu_handle_sys_read(fd, &buf, &count);"
+          if call not in s:
+              old="\tssize_t ret = -EBADF;\n"
+              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n\tif (unlikely(ksu_vfs_read_hook))\n"+call+"\n#endif\n",1); p.write_text(s)
+
+          patch("fs/stat.c",
+              "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)",
+              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n#endif\n\n#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)",
+              "ksu_handle_stat")
+          p=Path("fs/stat.c"); s=p.read_text()
+          call="\tksu_handle_stat(&dfd, &filename, &flag);"
+          if call not in s:
+              old="\tint error;\n\n\terror = vfs_fstatat(dfd, filename, &stat, flag);"
+              new="\tint error;\n#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n\n\terror = vfs_fstatat(dfd, filename, &stat, flag);"
+              if old not in s: raise SystemExit("fs/stat.c newfstatat anchor not found")
+              s=s.replace(old,new,1); p.write_text(s)
+
+          patch("kernel/reboot.c",
+              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,",
+              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif\n\nSYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,",
+              "ksu_handle_sys_reboot")
+          p=Path("kernel/reboot.c"); s=p.read_text()
+          call="\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);"
+          if call not in s:
+              old="\tint ret = 0;\n"
+              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
+
+          patch("drivers/input/input.c",
+              "void input_event(struct input_dev *dev,",
+              "#ifdef CONFIG_KSU_SUSFS\nextern bool ksu_input_hook __read_mostly;\nextern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n#endif\n\nvoid input_event(struct input_dev *dev,",
+              "ksu_handle_input_handle_event")
+          p=Path("drivers/input/input.c"); s=p.read_text()
+          call="\t\tksu_handle_input_handle_event(&type, &code, &value);"
+          if call not in s:
+              old="\tunsigned long flags;\n"
+              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n\tif (unlikely(ksu_input_hook))\n"+call+"\n#endif\n",1); p.write_text(s)
+          PY
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
