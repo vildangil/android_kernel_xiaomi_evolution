@@ -52,119 +52,35 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth=1 --branch kernel-4.14-backport https://github.com/devnoname120/susfs4ksu-toco.git susfs4ksu
-          find susfs4ksu/kernel_patches -maxdepth 2 -type f | sort
+          # MrGadget84's a325f branch carries a self-contained SUSFS v2.3.0
+          # backport for 4.14. Use it as one coherent patch instead of mixing
+          # the old devnoname120 backport with newer Nova SUSFS files.
+          SUSFS_PATCH="$RUNNER_TEMP/susfs-v2.3.0-4.14.patch"
+          curl -LSs "https://raw.githubusercontent.com/MrGadget84/kernel_builder/a325f/ksu/sus/susfs-v2.3.0.txt" -o "$SUSFS_PATCH"
+          grep -q 'susfs_sus_kstat_spoof_show_map_vma' "$SUSFS_PATCH"
+          grep -q 'susfs_open_redirect_spoof_do_sys_openat' "$SUSFS_PATCH"
 
-          test -f susfs4ksu/kernel_patches/fs/susfs.c
-          test -f susfs4ksu/kernel_patches/include/linux/susfs.h
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/susfs.c
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/susfs.h
-          test -f susfs4ksu/kernel_patches/include/linux/susfs_def.h
-          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/susfs_def.h
-
-          # ReSukiSU main tracks current SUSFS. The old 4.14 backport provides
-          # the VFS integration patch, but its userspace command API is stale.
-          # Pull current SUSFS v2.2.0 kernel-side files from a working MT6785
-          # kernel so dispatch.c and the kernel implementation stay in sync.
-          SUSFS_MT6785_REF="254573cba0bb441a15f51c4bb7e2fd0b7b6f6410"
-          curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/fs/susfs.c" -o fs/susfs.c
-          curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/include/linux/susfs.h" -o include/linux/susfs.h
-          curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/include/linux/susfs_def.h" -o include/linux/susfs_def.h
-          grep -q 'CMD_SUSFS_ADD_SUS_PATH_LOOP' include/linux/susfs_def.h
-          grep -q 'CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS' include/linux/susfs_def.h
-          grep -q 'CMD_SUSFS_ADD_SUS_MAP' include/linux/susfs_def.h
-          grep -q 'CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING' include/linux/susfs_def.h
-
-
-          # Keep the compatibility state/lookup bits expected by the existing
-          # 4.14 VFS backport. Current SUSFS renamed its inode flags, but the
-          # applied 4.14 patch still references these legacy compatibility names.
-          printf '%s\n' \
-            '#ifndef INODE_STATE_SUS_PATH' '#define INODE_STATE_SUS_PATH BIT(24)' '#endif' \
-            '#ifndef INODE_STATE_SUS_MOUNT' '#define INODE_STATE_SUS_MOUNT BIT(25)' '#endif' \
-            '#ifndef INODE_STATE_SUS_KSTAT' '#define INODE_STATE_SUS_KSTAT BIT(26)' '#endif' \
-            '#ifndef INODE_STATE_OPEN_REDIRECT' '#define INODE_STATE_OPEN_REDIRECT BIT(27)' '#endif' \
-            '#ifndef INODE_STATE_ANDROID_DATA_ROOT_DIR' '#define INODE_STATE_ANDROID_DATA_ROOT_DIR BIT(28)' '#endif' \
-            '#ifndef INODE_STATE_SDCARD_ROOT_DIR' '#define INODE_STATE_SDCARD_ROOT_DIR BIT(29)' '#endif' \
-            '#ifndef TASK_STRUCT_NON_ROOT_USER_APP_PROC' '#define TASK_STRUCT_NON_ROOT_USER_APP_PROC BIT(24)' '#endif' \
-            '#ifndef ND_STATE_FILENAME_CREATE' '#define ND_STATE_FILENAME_CREATE 8' '#endif' \
-            '#ifndef ND_STATE_RENAMEAT' '#define ND_STATE_RENAMEAT 16' '#endif' \
-            '#ifndef LOOKUP_FILENAME_CREATE' '#define LOOKUP_FILENAME_CREATE 0x800000' '#endif' \
-            '#ifndef LOOKUP_RENAMEAT' '#define LOOKUP_RENAMEAT 0x1000000' '#endif' \
-            '#ifndef DEFAULT_SUS_MNT_ID' '#define DEFAULT_SUS_MNT_ID 100000' '#endif' \
-            '#ifndef DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE' '#define DEFAULT_SUS_MNT_ID_FOR_KSU_PROC_UNSHARE 1000000' '#endif' \
-            '#ifndef DEFAULT_SUS_MNT_GROUP_ID' '#define DEFAULT_SUS_MNT_GROUP_ID 1000' '#endif' \
-            >> include/linux/susfs_def.h
-
-          SUSFS_PATCH="$(find susfs4ksu/kernel_patches -maxdepth 1 -type f -name '*4.14*.patch' | head -n1)"
-          test -n "$SUSFS_PATCH"
-          set +e
+          # Apply the 4.14 backport as a single generation. Rejects are fatal:
+          # silently mixing partial SUSFS generations is what caused the
+          # previous compile/link failures.
           patch -p1 --forward < "$SUSFS_PATCH"
-          PATCH_RC=$?
-          set -e
 
-          # The generic 4.14 patch above provides integration for the rest of
-          # the tree. Its VFS hunks use the obsolete SUSFS API, so overwrite
-          # only those affected call-site files with the current MT6785 port.
-          for f in fs/namei.c fs/readdir.c; do
-            curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/$f" -o "$f"
-          done
-          # task_mmu.c is platform-specific in this Xiaomi tree. Keep the
-          # native file and update only the current SUSFS kstat maps hook.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("fs/proc/task_mmu.c")
-          s = p.read_text()
-          if "susfs_sus_ino_for_show_map_vma" in s:
-              import re
-              s = re.sub(
-                  r"susfs_sus_ino_for_show_map_vma\s*\(\s*ino\s*,\s*&dev\s*,\s*&ino\s*\)\s*;",
-                  "susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);", s)
-              s = re.sub(
-                  r"extern\s+void\s+susfs_sus_ino_for_show_map_vma\s*\([^;]+\)\s*;",
-                  "extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);", s)
-          if "susfs_sus_ino_for_show_map_vma" in s:
-              raise SystemExit("legacy SUSFS show_map_vma hook still present")
-          p.write_text(s)
-          PY
-
-          # This Xiaomi tree carries a 3-argument vfs_open() extension.
+          # Xiaomi's tree extends vfs_open() with current_cred(). Adapt only
+          # this vendor ABI difference after the coherent 4.14 patch lands.
           sed -i \
             -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/' \
             -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/' \
             fs/namei.c
 
-          # Xiaomi's 4.14 tree differs from the backport baseline in three places.
-          # Apply the small compatibility pieces that the generic patch misses.
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("fs/proc/cmdline.c")
-          s = p.read_text()
-          if "susfs_spoof_cmdline_or_bootconfig" not in s:
-              s = s.replace("static int cmdline_proc_show(struct seq_file *m, void *v)\n{",
-                  "#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n"
-                  "extern int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);\n"
-                  "#endif\n"
-                  "static int cmdline_proc_show(struct seq_file *m, void *v)\n{\n"
-                  "#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n"
-                  "\tif (!susfs_spoof_cmdline_or_bootconfig(m)) {\n"
-                  "\t\tseq_putc(m, '\\n');\n"
-                  "\t\treturn 0;\n"
-                  "\t}\n"
-                  "#endif")
-              p.write_text(s)
-
-          p = Path("fs/proc/task_mmu.c")
-          s = p.read_text()
-          if "#include <linux/susfs_def.h>" not in s:
-              s = s.replace("#include <linux/mm_inline.h>\n",
-                  "#include <linux/mm_inline.h>\n"
-                  "#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\n"
-                  "#include <linux/susfs_def.h>\n"
-                  "#endif\n")
-              p.write_text(s)
-          PY
+          # Guard against accidentally reintroducing the obsolete SUSFS API.
+          ! grep -R -n --include='*.c' --include='*.h' \
+            -e 'susfs_sus_ino_for_show_map_vma' \
+            -e 'susfs_is_base_dentry_android_data_dir' \
+            -e 'susfs_is_sus_android_data_d_name_found' \
+            -e 'susfs_is_base_dentry_sdcard_dir' \
+            -e 'susfs_is_sus_sdcard_d_name_found' \
+            -e 'susfs_get_redirected_path' \
+            fs include/linux
 
           # ReSukiSU tracks current SUSFS hooks. The 4.14 backport is missing
           # the current setresuid hook required by the SUSFS inline mode.
@@ -346,7 +262,7 @@ jobs:
           set -euxo pipefail
           CFG="arch/arm64/configs/$DEFCONFIG"
           sed -i -e '/^CONFIG_KSU=/d' -e '/^CONFIG_KSU_TRACEPOINT_HOOK=/d' -e '/^CONFIG_KSU_MANUAL_HOOK=/d' -e '/^CONFIG_KSU_SUSFS=/d' -e '/^CONFIG_KSU_SUSFS_/d' "$CFG"
-          printf '%s\n' '' '# ReSukiSU + SUSFS' 'CONFIG_KSU=y' '# CONFIG_KSU_TRACEPOINT_HOOK is not set' 'CONFIG_KSU_SUSFS=y' 'CONFIG_KSU_SUSFS_SUS_PATH=y' 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' 'CONFIG_KSU_SUSFS_SUS_KSTAT=y' 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' 'CONFIG_KSU_SUSFS_SUS_MAP=y' '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' >> "$CFG"
+          printf '%s\n' '' '# ReSukiSU + SUSFS' 'CONFIG_KSU=y' '# CONFIG_KSU_TRACEPOINT_HOOK is not set' 'CONFIG_KSU_MANUAL_HOOK=y' 'CONFIG_KSU_SUSFS=y' 'CONFIG_KSU_SUSFS_SUS_PATH=y' 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' 'CONFIG_KSU_SUSFS_SUS_KSTAT=y' 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y' 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y' 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y' 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y' 'CONFIG_KSU_SUSFS_SUS_MAP=y' '# CONFIG_KSU_SUSFS_ENABLE_LOG is not set' >> "$CFG"
 
       - name: Generate config
         shell: bash
@@ -391,7 +307,7 @@ jobs:
           cp "$OUT/.config" artifacts/kernel.config
           find "$OUT/arch/arm64/boot" -maxdepth 1 -type f \( -name 'Image' -o -name 'Image.gz' -o -name 'Image.gz-dtb' -o -name '*.dtb' \) -exec cp -v {} artifacts/ \;
           git -C KernelSU rev-parse HEAD > artifacts/resukisu-commit.txt
-          git -C susfs4ksu rev-parse HEAD > artifacts/susfs-commit.txt
+          printf '%s\n' 'MrGadget84/kernel_builder:a325f:ksu/sus/susfs-v2.3.0.txt' > artifacts/susfs-source.txt
           test -n "$(find artifacts -maxdepth 1 -type f -name 'Image*' -print -quit)"
 
       - name: Upload artifacts
