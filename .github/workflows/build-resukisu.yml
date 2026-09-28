@@ -296,8 +296,8 @@ jobs:
           # Empty parameter lists are non-prototypes in C. These weak MTK hooks
           # take no arguments, so spell that explicitly for modern clang.
           sed -i \
-            -e 's/get_cur_vcore_uv()/get_cur_vcore_uv(void)/' \
-            -e 's/get_cur_ddr_khz()/get_cur_ddr_khz(void)/' \
+            -e 's/^int __attribute__((weak)) get_cur_vcore_uv()$/int __attribute__((weak)) get_cur_vcore_uv(void)/' \
+            -e 's/^int __attribute__((weak)) get_cur_ddr_khz()$/int __attribute__((weak)) get_cur_ddr_khz(void)/' \
             drivers/misc/mediatek/perf/perf_tracker.c
 
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
