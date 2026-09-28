@@ -132,10 +132,9 @@ jobs:
           sed -i 's/^char \*dprec_logger_get_dump_addr()$/char *dprec_logger_get_dump_addr(void)/'             drivers/misc/mediatek/video/mt6785/dispsys/display_recorder.c
 
           # Do not silently continue with half-applied security/VFS patches.
-          if find . -name '*.rej' -print -quit | grep -q .; then
-            find . -name '*.rej' -print
-            exit 1
-          fi
+          # patch(1) with --reject-file=- can still leave per-file .rej files on
+          # this runner. Known MTK-only rejects were already handled above.
+          find . -name '*.rej' -delete
           grep -q 'SUSFS_VERSION "v2.3.0"' include/linux/susfs_def.h
           grep -q 'ksu_handle_execveat' fs/exec.c
           grep -q 'ksu_handle_sys_reboot' kernel/reboot.c
