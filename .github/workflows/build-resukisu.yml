@@ -283,6 +283,11 @@ jobs:
           sed -i 's/^int get_cluster_off_token(cpu)$/int get_cluster_off_token(int cpu)/' \
             drivers/misc/mediatek/base/power/mcdi/mtk_mcdi_governor.c
 
+          # UDI buffers are 512 bytes including the trailing NUL. Limit sscanf
+          # to 511 payload bytes so clang fortify does not reject the old code.
+          sed -i 's/%512s/%511s/g' \
+            drivers/misc/mediatek/base/power/udi_v2/mtk_udi.c
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
