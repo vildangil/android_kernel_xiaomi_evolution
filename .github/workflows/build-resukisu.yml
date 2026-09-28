@@ -195,13 +195,13 @@ jobs:
 
           patch("fs/read_write.c",
               "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
-              "#ifdef CONFIG_KSU_SUSFS\nextern bool ksu_vfs_read_hook __read_mostly;\nextern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif\n\nSYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
+              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif\n\nSYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
               "ksu_handle_sys_read")
           p=Path("fs/read_write.c"); s=p.read_text()
           call="\t\tksu_handle_sys_read(fd, &buf, &count);"
           if call not in s:
               old="\tssize_t ret = -EBADF;\n"
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n\tif (unlikely(ksu_vfs_read_hook))\n"+call+"\n#endif\n",1); p.write_text(s)
+              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
 
           patch("fs/stat.c",
               "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)",
@@ -226,12 +226,12 @@ jobs:
               s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
 
           p=Path("drivers/input/input.c"); s=p.read_text()
-          decl="extern bool ksu_input_hook __read_mostly;"
+          decl="extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);"
           if decl not in s:
               anchor="static void input_handle_event(struct input_dev *dev,"
               if anchor not in s: raise SystemExit("drivers/input/input.c declaration anchor not found")
               block=("#ifdef CONFIG_KSU_SUSFS\n"
-                     "extern bool ksu_input_hook __read_mostly;\n"
+
                      "extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n"
                      "#endif\n\n")
               s=s.replace(anchor,block+anchor,1)
@@ -240,7 +240,7 @@ jobs:
           if call not in s:
               old="\tint disposition = input_get_disposition(dev, type, code, &value);\n"
               if old not in s: raise SystemExit("drivers/input/input.c call anchor not found")
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n\tif (unlikely(ksu_input_hook))\n"+call+"\n#endif\n",1)
+              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1)
           p.write_text(s)
           PY
 
