@@ -48,214 +48,61 @@ jobs:
           set -euxo pipefail
           curl -LSs https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh | bash
 
-      - name: Fetch and apply SUSFS 4.14 backport
+      - name: Apply MrGadget84 ReSukiSU + SUSFS 4.14 patches
         shell: bash
         run: |
           set -euxo pipefail
-          # MrGadget84's a325f branch carries a self-contained SUSFS v2.3.0
-          # backport for 4.14. Use it as one coherent patch instead of mixing
-          # the old devnoname120 backport with newer Nova SUSFS files.
-          SUSFS_PATCH="$RUNNER_TEMP/susfs-v2.3.0-4.14.patch"
-          curl -LSs "https://raw.githubusercontent.com/MrGadget84/kernel_builder/a325f/ksu/sus/susfs-v2.3.0.txt" -o "$SUSFS_PATCH"
-          grep -q 'susfs_sus_kstat_spoof_show_map_vma' "$SUSFS_PATCH"
-          grep -q 'susfs_open_redirect_spoof_do_sys_openat' "$SUSFS_PATCH"
+          BASE="https://raw.githubusercontent.com/MrGadget84/kernel_builder"
+          curl -fLSs "$BASE/d5369129c68fb8ce1e9fcc14e135300092bb913c/ksu/hooks/resukisu-patches-4.14-kernel.patch" -o /tmp/resukisu-4.14.patch
+          curl -fLSs "$BASE/a325f/ksu/sus/50_add_susfs_in_kernel-4.14.patch" -o /tmp/susfs-4.14-base.patch
+          curl -fLSs "$BASE/a325f/ksu/sus/susfs-v2.3.0.txt" -o /tmp/susfs-v2.3.0.patch
 
-          # Apply the 4.14 backport as a single generation. Rejects are fatal:
-          # silently mixing partial SUSFS generations is what caused the
-          # previous compile/link failures.
-          patch -p1 --forward < "$SUSFS_PATCH"
+          # ReSukiSU's own 4.14 manual hooks, not WhiteSU/KSU-next hooks.
+          patch -p1 --forward < /tmp/resukisu-4.14.patch
 
-          # Xiaomi's tree extends vfs_open() with current_cred(). Adapt only
-          # this vendor ABI difference after the coherent 4.14 patch lands.
-          sed -i \
-            -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/' \
-            -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/' \
-            fs/namei.c
-
-          # Guard against accidentally reintroducing the obsolete SUSFS API.
-          ! grep -R -n --include='*.c' --include='*.h' \
-            -e 'susfs_sus_ino_for_show_map_vma' \
-            -e 'susfs_is_base_dentry_android_data_dir' \
-            -e 'susfs_is_sus_android_data_d_name_found' \
-            -e 'susfs_is_base_dentry_sdcard_dir' \
-            -e 'susfs_is_sus_sdcard_d_name_found' \
-            -e 'susfs_get_redirected_path' \
-            fs include/linux
-
-          # ReSukiSU tracks current SUSFS hooks. The 4.14 backport is missing
-          # the current setresuid hook required by the SUSFS inline mode.
+          # MrGadget84 splits the 4.14 port between a structural patch and the
+          # v2.3.0 SUSFS patch. Apply only the structural-only files from 50_*
+          # first; overlapping VFS files are supplied by v2.3.0 itself.
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("kernel/sys.c")
-          s = p.read_text()
-          if "ksu_handle_setresuid" not in s:
-              marker = "/*\n * This function implements a generic ability to update ruid, euid,"
-              decl = "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif\n\n"
-              if marker not in s:
-                  raise SystemExit("setresuid declaration anchor not found")
-              s = s.replace(marker, decl + marker, 1)
-              anchor = "\tkuid_t kruid, keuid, ksuid;\n"
-              hook = anchor + "#ifdef CONFIG_KSU_SUSFS\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif\n"
-              if anchor not in s:
-                  raise SystemExit("setresuid call anchor not found")
-              s = s.replace(anchor, hook, 1)
-              p.write_text(s)
+          src=Path("/tmp/susfs-4.14-base.patch").read_text()
+          keep={
+              "fs/dcache.c",
+              "fs/overlayfs/inode.c","fs/overlayfs/overlayfs.h",
+              "fs/overlayfs/readdir.c","fs/overlayfs/super.c","fs/overlayfs/util.c",
+              "include/linux/mount.h","include/linux/sched.h",
+          }
+          chunks=src.split("diff --git ")
+          out=[]
+          for ch in chunks[1:]:
+              first=ch.splitlines()[0]
+              path=first.split()[0]
+              if path.startswith("a/"): path=path[2:]
+              if path in keep: out.append("diff --git "+ch)
+          Path("/tmp/susfs-4.14-struct.patch").write_text("".join(out))
           PY
+          patch -p1 --forward < /tmp/susfs-4.14-struct.patch
+          patch -p1 --forward < /tmp/susfs-v2.3.0.patch
 
-          python3 - <<'PY'
-          from pathlib import Path
+          # Xiaomi MT6785 carries a 3-argument vfs_open extension.
+          sed -i             -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/'             -e 's/vfs_open(&path, file);/vfs_open(\&path, file, current_cred());/'             fs/namei.c
 
-          p = Path("fs/exec.c")
-          s = p.read_text()
-          if "ksu_handle_execveat" not in s:
-              decl_anchor = "/*\n * sys_execve() executes a new program.\n */\nstatic int do_execveat_common"
-              decl = (
-                  "#ifdef CONFIG_KSU_SUSFS\n"
-                  "__attribute__((hot))\n"
-                  "extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,\n"
-                  "\t\t\t\tvoid *argv, void *envp, int *flags);\n"
-                  "__attribute__((hot))\n"
-                  "extern int ksu_handle_post_execveat(int *fd, struct filename **filename_ptr,\n"
-                  "\t\t\t\tvoid *argv, void *envp, int *flags, int *retval);\n"
-                  "#endif\n\n"
-              )
-              if decl_anchor not in s:
-                  raise SystemExit("execve declaration anchor not found")
-              s = s.replace(decl_anchor, decl + decl_anchor, 1)
+          # Existing MTK/clang compatibility fixes unrelated to KSU/SUSFS.
+          sed -i 's/^int get_cluster_off_token(cpu)$/int get_cluster_off_token(int cpu)/'             drivers/misc/mediatek/base/power/mcdi/mtk_mcdi_governor.c
+          sed -i 's/%512s/%511s/g'             drivers/misc/mediatek/base/power/udi_v2/mtk_udi.c
+          sed -i 's/^extern ddp_dsi_config(/extern int ddp_dsi_config(/'             drivers/misc/mediatek/video/mt6785/videox/disp_recovery.h
+          sed -i             -e 's/^int __attribute__((weak)) get_cur_vcore_uv()$/int __attribute__((weak)) get_cur_vcore_uv(void)/'             -e 's/^int __attribute__((weak)) get_cur_ddr_khz()$/int __attribute__((weak)) get_cur_ddr_khz(void)/'             drivers/misc/mediatek/perf/perf_tracker.c
+          sed -i 's/^char \*dprec_logger_get_dump_addr()$/char *dprec_logger_get_dump_addr(void)/'             drivers/misc/mediatek/video/mt6785/dispsys/display_recorder.c
 
-              body_anchor = (
-                  "static int do_execveat_common(int fd, struct filename *filename,\n"
-                  "\t\t\t      struct user_arg_ptr argv,\n"
-                  "\t\t\t      struct user_arg_ptr envp,\n"
-                  "\t\t\t      int flags)\n"
-                  "{\n"
-              )
-              body_repl = body_anchor + (
-                  "#ifdef CONFIG_KSU_SUSFS\n"
-                  "\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n"
-                  "#endif\n"
-              )
-              if body_anchor not in s:
-                  raise SystemExit("execve body anchor not found")
-              s = s.replace(body_anchor, body_repl, 1)
+          # Do not silently continue with half-applied security/VFS patches.
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            find . -name '*.rej' -print
+            exit 1
+          fi
+          grep -q 'SUSFS_VERSION "v2.3.0"' include/linux/susfs_def.h
+          grep -q 'ksu_handle_execveat' fs/exec.c
+          grep -q 'ksu_handle_sys_reboot' kernel/reboot.c
 
-              ret_anchor = "out_ret:\n\tputname(filename);\n\treturn retval;\n"
-              ret_repl = (
-                  "out_ret:\n"
-                  "#ifdef CONFIG_KSU_SUSFS\n"
-                  "\tksu_handle_post_execveat(&fd, &filename, &argv, &envp, &flags, &retval);\n"
-                  "#endif\n"
-                  "\tputname(filename);\n"
-                  "\treturn retval;\n"
-              )
-              if ret_anchor not in s:
-                  raise SystemExit("execve return anchor not found")
-              s = s.replace(ret_anchor, ret_repl, 1)
-              p.write_text(s)
-          PY
-
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def patch(path, old, new, name):
-              p=Path(path); s=p.read_text()
-              if name not in s:
-                  if old not in s: raise SystemExit(f"{path}: anchor for {name} not found")
-                  p.write_text(s.replace(old,new,1))
-
-          patch("fs/open.c",
-              "/*\n * access() needs to use the real uid/gid, not the effective uid/gid.",
-              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\n#endif\n\n/*\n * access() needs to use the real uid/gid, not the effective uid/gid.",
-              "ksu_handle_faccessat")
-          p=Path("fs/open.c"); s=p.read_text()
-          call="\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);"
-          if call not in s:
-              fn="SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)\n{"
-              if fn not in s: raise SystemExit("fs/open.c faccessat function anchor not found")
-              s=s.replace(fn,fn+"\n#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif",1); p.write_text(s)
-
-          patch("fs/read_write.c",
-              "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
-              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);\n#endif\n\nSYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
-              "ksu_handle_sys_read")
-          p=Path("fs/read_write.c"); s=p.read_text()
-          call="\t\tksu_handle_sys_read(fd, &buf, &count);"
-          if call not in s:
-              old="\tssize_t ret = -EBADF;\n"
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
-
-          patch("fs/stat.c",
-              "#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)",
-              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\n#endif\n\n#if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)",
-              "ksu_handle_stat")
-          p=Path("fs/stat.c"); s=p.read_text()
-          call="\tksu_handle_stat(&dfd, &filename, &flag);"
-          if call not in s:
-              old="\tint error;\n\n\terror = vfs_fstatat(dfd, filename, &stat, flag);"
-              new="\tint error;\n#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n\n\terror = vfs_fstatat(dfd, filename, &stat, flag);"
-              if old not in s: raise SystemExit("fs/stat.c newfstatat anchor not found")
-              s=s.replace(old,new,1); p.write_text(s)
-
-          patch("kernel/reboot.c",
-              "SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,",
-              "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);\n#endif\n\nSYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,",
-              "ksu_handle_sys_reboot")
-          p=Path("kernel/reboot.c"); s=p.read_text()
-          call="\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);"
-          if call not in s:
-              old="\tint ret = 0;\n"
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
-
-          p=Path("drivers/input/input.c"); s=p.read_text()
-          decl="extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);"
-          if decl not in s:
-              anchor="static void input_handle_event(struct input_dev *dev,"
-              if anchor not in s: raise SystemExit("drivers/input/input.c declaration anchor not found")
-              block=("#ifdef CONFIG_KSU_SUSFS\n"
-
-                     "extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\n"
-                     "#endif\n\n")
-              s=s.replace(anchor,block+anchor,1)
-
-          call="\tksu_handle_input_handle_event(&type, &code, &value);"
-          if call not in s:
-              old="\tint disposition = input_get_disposition(dev, type, code, &value);\n"
-              if old not in s: raise SystemExit("drivers/input/input.c call anchor not found")
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1)
-          p.write_text(s)
-          PY
-
-          # Old MTK 4.14 sources still contain a K&R-style function definition.
-          # Modern clang diagnoses it as -Wdeprecated-non-prototype and this tree
-          # promotes that diagnostic to an error. Preserve behavior, add the type.
-          sed -i 's/^int get_cluster_off_token(cpu)$/int get_cluster_off_token(int cpu)/' \
-            drivers/misc/mediatek/base/power/mcdi/mtk_mcdi_governor.c
-
-          # UDI buffers are 512 bytes including the trailing NUL. Limit sscanf
-          # to 511 payload bytes so clang fortify does not reject the old code.
-          sed -i 's/%512s/%511s/g' \
-            drivers/misc/mediatek/base/power/udi_v2/mtk_udi.c
-
-          # Legacy GNU C treated a missing function return type as int.
-          # Make that implicit type explicit for modern clang.
-          sed -i 's/^extern ddp_dsi_config(/extern int ddp_dsi_config(/' \
-            drivers/misc/mediatek/video/mt6785/videox/disp_recovery.h
-
-          # Empty parameter lists are non-prototypes in C. These weak MTK hooks
-          # take no arguments, so spell that explicitly for modern clang.
-          sed -i \
-            -e 's/^int __attribute__((weak)) get_cur_vcore_uv()$/int __attribute__((weak)) get_cur_vcore_uv(void)/' \
-            -e 's/^int __attribute__((weak)) get_cur_ddr_khz()$/int __attribute__((weak)) get_cur_ddr_khz(void)/' \
-            drivers/misc/mediatek/perf/perf_tracker.c
-
-          sed -i \
-            's/^char \*dprec_logger_get_dump_addr()$/char *dprec_logger_get_dump_addr(void)/' \
-            drivers/misc/mediatek/video/mt6785/dispsys/display_recorder.c
-
-          rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
-          # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
-          # The rest of the 4.14 patch applied; continue and let compilation validate it.
-          # The upstream SUSFS 4.14 backport contains whitespace-only style warnings.\n          # Do not turn those into a CI failure; compilation is the real validation.\n          git diff --check || true\n
       - name: Configure ReSukiSU and SUSFS
         shell: bash
         run: |
