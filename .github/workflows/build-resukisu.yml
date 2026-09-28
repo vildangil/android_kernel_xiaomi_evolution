@@ -121,6 +121,58 @@ jobs:
               p.write_text(s)
           PY
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("fs/exec.c")
+          s = p.read_text()
+          if "ksu_handle_execveat" not in s:
+              decl_anchor = "/*\n * sys_execve() executes a new program.\n */\nstatic int do_execveat_common"
+              decl = (
+                  "#ifdef CONFIG_KSU_SUSFS\n"
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,\n"
+                  "\t\t\t\tvoid *argv, void *envp, int *flags);\n"
+                  "__attribute__((hot))\n"
+                  "extern int ksu_handle_post_execveat(int *fd, struct filename **filename_ptr,\n"
+                  "\t\t\t\tvoid *argv, void *envp, int *flags, int *retval);\n"
+                  "#endif\n\n"
+              )
+              if decl_anchor not in s:
+                  raise SystemExit("execve declaration anchor not found")
+              s = s.replace(decl_anchor, decl + decl_anchor, 1)
+
+              body_anchor = (
+                  "static int do_execveat_common(int fd, struct filename *filename,\n"
+                  "\t\t\t      struct user_arg_ptr argv,\n"
+                  "\t\t\t      struct user_arg_ptr envp,\n"
+                  "\t\t\t      int flags)\n"
+                  "{\n"
+              )
+              body_repl = body_anchor + (
+                  "#ifdef CONFIG_KSU_SUSFS\n"
+                  "\tksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\n"
+                  "#endif\n"
+              )
+              if body_anchor not in s:
+                  raise SystemExit("execve body anchor not found")
+              s = s.replace(body_anchor, body_repl, 1)
+
+              ret_anchor = "out_ret:\n\tputname(filename);\n\treturn retval;\n"
+              ret_repl = (
+                  "out_ret:\n"
+                  "#ifdef CONFIG_KSU_SUSFS\n"
+                  "\tksu_handle_post_execveat(&fd, &filename, &argv, &envp, &flags, &retval);\n"
+                  "#endif\n"
+                  "\tputname(filename);\n"
+                  "\treturn retval;\n"
+              )
+              if ret_anchor not in s:
+                  raise SystemExit("execve return anchor not found")
+              s = s.replace(ret_anchor, ret_repl, 1)
+              p.write_text(s)
+          PY
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
