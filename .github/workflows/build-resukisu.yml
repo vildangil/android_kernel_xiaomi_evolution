@@ -106,9 +106,25 @@ jobs:
           # The generic 4.14 patch above provides integration for the rest of
           # the tree. Its VFS hunks use the obsolete SUSFS API, so overwrite
           # only those affected call-site files with the current MT6785 port.
-          for f in fs/namei.c fs/readdir.c fs/proc/task_mmu.c; do
+          for f in fs/namei.c fs/readdir.c; do
             curl -LSs "https://raw.githubusercontent.com/Nova-Kernels/kernel_xiaomi_mt6785/$SUSFS_MT6785_REF/$f" -o "$f"
           done
+          # task_mmu.c is platform-specific in this Xiaomi tree. Keep the
+          # native file and update only the current SUSFS kstat maps hook.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("fs/proc/task_mmu.c")
+          s = p.read_text()
+          if "susfs_sus_ino_for_show_map_vma" in s:
+              s = s.replace(
+                  "extern void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned long *out_ino);",
+                  "extern void susfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);")
+              s = s.replace(
+                  "susfs_sus_ino_for_show_map_vma(ino, &dev, &ino);",
+                  "susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);")
+          p.write_text(s)
+          PY
+
           # This Xiaomi tree carries a 3-argument vfs_open() extension.
           sed -i \
             -e 's/vfs_open(&nd->path, file);/vfs_open(\&nd->path, file, current_cred());/' \
