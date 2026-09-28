@@ -101,6 +101,26 @@ jobs:
               p.write_text(s)
           PY
 
+          # ReSukiSU tracks current SUSFS hooks. The 4.14 backport is missing
+          # the current setresuid hook required by the SUSFS inline mode.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("kernel/sys.c")
+          s = p.read_text()
+          if "ksu_handle_setresuid" not in s:
+              marker = "/*\n * This function implements a generic ability to update ruid, euid,"
+              decl = "#ifdef CONFIG_KSU_SUSFS\nextern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n#endif\n\n"
+              if marker not in s:
+                  raise SystemExit("setresuid declaration anchor not found")
+              s = s.replace(marker, decl + marker, 1)
+              anchor = "\tkuid_t kruid, keuid, ksuid;\n"
+              hook = anchor + "#ifdef CONFIG_KSU_SUSFS\n\t(void)ksu_handle_setresuid(ruid, euid, suid);\n#endif\n"
+              if anchor not in s:
+                  raise SystemExit("setresuid call anchor not found")
+              s = s.replace(anchor, hook, 1)
+              p.write_text(s)
+          PY
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
