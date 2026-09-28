@@ -293,6 +293,13 @@ jobs:
           sed -i 's/^extern ddp_dsi_config(/extern int ddp_dsi_config(/' \
             drivers/misc/mediatek/video/mt6785/videox/disp_recovery.h
 
+          # Empty parameter lists are non-prototypes in C. These weak MTK hooks
+          # take no arguments, so spell that explicitly for modern clang.
+          sed -i \
+            -e 's/get_cur_vcore_uv()/get_cur_vcore_uv(void)/' \
+            -e 's/get_cur_ddr_khz()/get_cur_ddr_khz(void)/' \
+            drivers/misc/mediatek/perf/perf_tracker.c
+
           rm -f fs/notify/fdinfo.c.rej fs/proc/cmdline.c.rej fs/proc/task_mmu.c.rej
           # fdinfo's failed hunk is optional in this vendor fsnotify implementation.
           # The rest of the 4.14 patch applied; continue and let compilation validate it.
