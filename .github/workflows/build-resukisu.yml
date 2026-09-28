@@ -189,8 +189,9 @@ jobs:
           p=Path("fs/open.c"); s=p.read_text()
           call="\tksu_handle_faccessat(&dfd, &filename, &mode, NULL);"
           if call not in s:
-              old="\tunsigned int lookup_flags = LOOKUP_FOLLOW;\n"
-              s=s.replace(old,old+"#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif\n",1); p.write_text(s)
+              fn="SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)\n{"
+              if fn not in s: raise SystemExit("fs/open.c faccessat function anchor not found")
+              s=s.replace(fn,fn+"\n#ifdef CONFIG_KSU_SUSFS\n"+call+"\n#endif",1); p.write_text(s)
 
           patch("fs/read_write.c",
               "SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)\n{",
